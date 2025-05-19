@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Gasolineras Cercanas</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        /* Estilos para ordenador */
+        @media (min-width: 768px) {
+            #ubicacion-manual {
+                display: block;
+            }
+        }
+
+        /* Estilos para móvil */
+        @media (max-width: 767px) {
+            #ubicacion-manual {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-light">
+
+    <div class="container mt-4">
+        <h1 class="text-center mb-4">⛽ Gasolineras Cercanas</h1>
+
+        <div class="card p-3 mb-4">
+            <div class="mb-3">
+                <label for="combustible" class="form-label">Tipo de carburante</label>
+                <select id="combustible" class="form-select">
+                    <option value="Precio Gasoleo A">Gasóleo A</option>
+                    <option value="Precio Gasolina 95 E5">Gasolina 95</option>
+                    <option value="Precio Gasolina 98 E5">Gasolina 98</option>
+                </select>
+            </div>
+            <div id="ubicacion-manual" class="mb-3">
+                <label for="direccion" class="form-label">Introduce tu dirección</label>
+                <input type="text" id="direccion" class="form-control" placeholder="Ej: Calle Mayor, 1, Madrid">
+            </div>
+            <button onclick="buscarGasolineras()" class="btn btn-primary w-100">🔍 Buscar Estaciones</button>
+        </div>
+
+        <div id="estado" class="alert alert-info">Esperando ubicación...</div>
+        <div id="resultados"></div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Variables globales para ubicación
+        let userLat = null;
+        let userLon = null;
+        let mapa = null;
+
+        // Función para inicializar el mapa con Leaflet
+        function inicializarMapa() {
+            mapa = L.map('map').setView([userLat, userLon], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+            }).addTo(mapa);
+            L.marker([userLat, userLon]).addTo(mapa)
+                .bindPopup("Tú estás aquí")
+                .openPopup();
+        }
+
+        // Función para calcular la distancia entre dos coordenadas
+        function calcularDistanciaKm(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radio de la Tierra en km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        // Función principal que busca y filtra las gasolineras
+        async function buscarGasolineras() {
+            const tipo = document.getElementById("combustible").value;
+            const direccionInput = document.getElementById("direccion").value;
+            document.getElementById("estado").textContent = "Buscando estaciones cercanas...";
+
+            try {
+                // Obtener la ubicación del usuario
+                if (direccionInput) {
+                    // Si el usuario introdujo una dirección, geocodificarla
+                    const ubicacion = await obtenerGeocodificacion(direccionInput);
+                    userLat = ubicacion.lat;
+                    userLon = ubicacion.lon;
+                } else {
+                    // Si no, intentar obtener la ubicación por geolocalización
+                    const ubicacion = await obtenerUbicacion();
+                    userLat = ubicacion.lat;
+                    userLon = ubicacion.lon;
+                }
+
+                // Si no se pudo obtener la ubicación, mostrar un mensaje de error
+                if (userLat === null || userLon === null) {
+                    document.getElementById("estado").textContent = "No se pudo obtener la ubicación. Por favor, introduce una dirección.";
+                    return;
+                }
+
+                // Inicializar el mapa con la ubicación del usuario
+                inicializarMapa();
+
+                // Realizar la llamada a la API del gobierno
+                const response = await fetch("https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/");
+                const data = await response.json();
+
+                // Verificar la estructura de la respuesta
+                if (!data || !Array.isArray(data.ListaEESSPrecio)) {
+                    throw new Error("Estructura de datos de la API inesperada.");
+                }
+
+                const listaGasolineras = data.ListaEESSPrecio;
+
+                // Filtrar las gasolineras por tipo de combustible y calcular la distancia
+                let resultados = [];
+                for (let gasolinera of listaGasolineras) {
+                    try {
+                        const lat = parseFloat(gasolinera["Latitud"].replace(",", "."));
+                        const lon = parseFloat(gasolinera["Longitud (WGS84)"].replace(",", "."));
+                        const distancia = calcularDistanciaKm(userLat, userLon, lat, lon);
+
+                        // Verificar si el precio del combustible está disponible y es un número
+                        let precio = NaN;
+                        if (tipo === "Precio Gasoleo A") {
+                            precio = parseFloat(gasolinera["Precio Gasoleo A"]?.replace(",", ".")) || NaN;
+                        } else if (tipo === "Precio Gasolina 95 E5") {
+                            precio = parseFloat(gasolinera["Precio Gasolina 95 E5"]?.replace(",", ".")) || NaN;
+                        } else if (tipo === "Precio Gasolina 98 E5") {
+                            precio = parseFloat(gasolinera["Precio Gasolina 98 E5"]?.replace(",", ".")) || NaN;
+                        }
+                        const rotulo = gasolinera["Rótulo"]?.toLowerCase() || "";
+
+                        if (isNaN(precio) || isNaN(lat) || isNaN(lon)) continue;
+
+                        resultados.push({
+                            nombre: gasolinera["Rótulo"],
+                            direccion: gasolinera["Dirección"],
+                            municipio: gasolinera["Municipio"],
+                            precio: precio.toFixed(3), // Mostrar precio con 3 decimales
+                            distancia: distancia.toFixed(2), // Mostrar distancia con 2 decimales
+                            coords: [lat, lon]
+                        });
+                    } catch (error) {
+                        console.error("Error al procesar la estación de servicio:", error);
+                    }
+                }
+
+                // Ordenar los resultados por distancia
+                resultados.sort((a, b) => a.distancia - b.distancia);
+
+                // Mostrar los 3 resultados más cercanos
+                mostrarResultados(resultados.slice(0, 3));
+
+            } catch (error) {
+                document.getElementById("estado").textContent = "Error al obtener datos de las gasolineras: " + error.message;
+                console.error("Error:", error);
+            }
+        }
+
+        // Mostrar los resultados en el DOM y en el mapa
+        function mostrarResultados(lista) {
+            const contenedor = document.getElementById("resultados");
+            contenedor.innerHTML = ""; // Limpiar resultados anteriores
+            if (mapa) {
+                mapa.eachLayer(layer => {
+                    if (layer instanceof L.Marker && !layer._popup._content.includes("Tú estás aquí")) {
+                        mapa.removeLayer(layer); // Eliminar marcadores anteriores excepto el del usuario
+                    }
+                });
+            }
+
+            if (lista.length === 0) {
+                contenedor.innerHTML = "<p>No se encontraron gasolineras cercanas con el combustible seleccionado.</p>";
+                return;
+            }
+
+            lista.forEach(gasolinera => {
+                const listItem = document.createElement("div");
+                listItem.className = "card mb-2";
+                listItem.innerHTML = `
+          <div class="card-body">
+            <h5 class="card-title">${gasolinera.nombre}</h5>
+            <p class="card-text">
+              <strong>Dirección:</strong> ${gasolinera.direccion}, ${gasolinera.municipio}<br>
+              <strong>Precio:</strong> ${gasolinera.precio} €/L<br>
+              <strong>Distancia:</strong> ${gasolinera.distancia} km
+            </p>
+          </div>
+        `;
+                contenedor.appendChild(listItem);
+
+                // Añadir marcador al mapa
+                L.marker(gasolinera.coords).addTo(mapa)
+                    .bindPopup(`<b>${gasolinera.nombre}</b><br>Precio: ${gasolinera.precio} €/L<br>Distancia: ${gasolinera.distancia} km`);
+            });
+        }
+
+        // Función para obtener la ubicación del usuario mediante la API de geolocalización
+        function obtenerUbicacion() {
+            return new Promise((resolve, reject) => {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                            resolve({
+                                lat: pos.coords.latitude,
+                                lon: pos.coords.longitude
+                            });
+                        },
+                        (err) => {
+                            reject(err);
+                        }
+                    );
+                } else {
+                    reject(new Error("Geolocalización no soportada por el navegador."));
+                }
+            });
+        }
+
+        // Función para obtener la geocodificación de una dirección utilizando una API externa (OpenStreetMap Nominatim)
+        function obtenerGeocodificacion(direccion) {
+            return new Promise((resolve, reject) => {
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(direccion)}`;
+                fetch(url)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`Error al obtener la geocodificación: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data && data.length > 0) {
+                            resolve({
+                                lat: parseFloat(data[0].lat),
+                                lon: parseFloat(data[0].lon)
+                            });
+                        } else {
+                            reject(new Error("No se encontraron resultados para la dirección proporcionada."));
+                        }
+                    })
+                    .catch(error => reject(error));
+            });
+        }
+
+        // Obtener la ubicación del usuario al cargar la página
+        window.onload = () => {
+            // Detectar si es un dispositivo móvil
+            if (/Mobi|Android/i.test(navigator.userAgent)) {
+                obtenerUbicacion()
+                    .then(ubicacion => {
+                        userLat = ubicacion.lat;
+                        userLon = ubicacion.lon;
+                        inicializarMapa();
+                        document.getElementById("estado").textContent = "Ubicación obtenida. Listo para buscar gasolineras.";
+                    })
+                    .catch(error => {
+                        console.error("Error al obtener ubicación:", error);
+                        document.getElementById("estado").textContent = "No se pudo obtener la ubicación automáticamente. Por favor, introduce una dirección.";
+                    });
+            } else {
+                document.getElementById("estado").textContent = "Por favor, introduce una dirección.";
+            }
+        };
+    </script>
+</body>
+
+</html>
