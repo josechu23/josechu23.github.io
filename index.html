@@ -66,13 +66,15 @@
 
         // Función para inicializar el mapa con Leaflet
         function inicializarMapa() {
-            mapa = L.map('map').setView([userLat, userLon], 13);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-            }).addTo(mapa);
-            L.marker([userLat, userLon]).addTo(mapa)
-                .bindPopup("Tú estás aquí")
-                .openPopup();
+            if (!mapa) { // Verifica si el mapa ya ha sido inicializado
+                mapa = L.map('map').setView([userLat, userLon], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                }).addTo(mapa);
+                L.marker([userLat, userLon]).addTo(mapa)
+                    .bindPopup("Tú estás aquí")
+                    .openPopup();
+            }
         }
 
         // Función para calcular la distancia entre dos coordenadas
@@ -280,3 +282,4 @@
 </body>
 
 </html>
+
