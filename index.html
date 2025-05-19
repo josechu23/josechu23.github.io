@@ -63,6 +63,7 @@
         let userLat = null;
         let userLon = null;
         let mapa = null;
+        let userMarker = null; // Marker para la ubicación del usuario
 
         // Función para inicializar el mapa con Leaflet
         function inicializarMapa() {
@@ -71,7 +72,7 @@
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     maxZoom: 19,
                 }).addTo(mapa);
-                L.marker([userLat, userLon]).addTo(mapa)
+                userMarker = L.marker([userLat, userLon]).addTo(mapa) // Crea el marker y lo asigna a la variable
                     .bindPopup("Tú estás aquí")
                     .openPopup();
             }
@@ -117,6 +118,16 @@
 
                 // Inicializar el mapa con la ubicación del usuario
                 inicializarMapa();
+
+                // Actualizar la posición del marcador del usuario
+                if (userMarker) {
+                    userMarker.setLatLng([userLat, userLon]); // Actualiza la posición del marcador
+                } else {
+                    userMarker = L.marker([userLat, userLon]).addTo(mapa) // Crea el marker y lo asigna a la variable
+                        .bindPopup("Tú estás aquí")
+                        .openPopup();
+                }
+                mapa.setView([userLat, userLon], 13); // Centra el mapa en la nueva ubicación
 
                 // Realizar la llamada a la API del gobierno
                 const response = await fetch("https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/");
